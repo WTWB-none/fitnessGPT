@@ -1,2 +1,9 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
+body {
+    background: linear-gradient(225deg, #2d0c5e, #000000);
+    min-height: 100vh;
+    margin: 0;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  

@@ -16,14 +16,11 @@
 	}
 
 	async function sendData(query) {
-		let response = await fetch('http://localhost:8000/create_user', {
+		let response = await fetch('http://localhost:8000/auth/user', {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
 			body: JSON.stringify(query)
 		});
-
+		console.log(response);
 		return response;
 	}
 
@@ -32,16 +29,21 @@
 		accessToken = params.split('&')[0].split('=')[1];
 		userData = await getUserData();
 		request = {
-			password: userData.client_id,
 			name: userData.login,
 			email: userData.default_email,
-			phone: userData.default_phone.number
+			phone: userData.default_phone.number,
+			auth: {
+				Yandex: {
+					provider_user_id: userData.client_id
+				}
+			}
 		};
-		let result = sendData(request);
-		if (result.ok) {
+		let result = await sendData(request);
+		console.log(result);
+		if (result.status === 200) {
 			window.close();
+		} else {
+			alert('Error creating user');
 		}
 	});
 </script>
-
-<h1>{JSON.stringify(request)}</h1>
