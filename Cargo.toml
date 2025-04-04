@@ -1,0 +1,11 @@
+[package]
+name = "product_prog"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rocket = { version = "0.5.0", features = ["json"] }
+surrealdb = { version = "2.2.1", features = ["kv-rocksdb"] }
+serde_json = "1.0.133"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
