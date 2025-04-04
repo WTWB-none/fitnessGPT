@@ -7,7 +7,14 @@ use rocket_cors::{AllowedOrigins, CorsOptions};
 use surrealdb::Surreal;
 use surrealdb::engine::local::{RocksDb, Db};
 
+use uuid::Uuid;
+
+use argon2::{Argon2, PasswordHasher};
+use argon2::password_hash::{SaltString, rand_core::OsRng};
+
+
 mod entity;
+mod validation;
 
 async fn init_db() -> surrealdb::Result<Surreal<Db>> {
     let db = Surreal::new::<RocksDb>("data/db").await?;
@@ -15,33 +22,39 @@ async fn init_db() -> surrealdb::Result<Surreal<Db>> {
     Ok(db)
 }
 
-fn validate_name(phone: String) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
+fn hash_password(password: &str) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+
+    let hash = argon2
+        .hash_password(password.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+
+    hash
 }
 
-fn validate_email(email: String) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
-}
-
-fn validate_pass(pass: String) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
-}
-
-fn validate_phone(phone: String) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
-}
-
-#[post("/create_user", data = "<user>")]
+#[post("/auth/user", data = "<user>")]
 async fn create_user(user: Json<entity::User>) -> Json<String> {
     let user_data = user.into_inner();
     println!("Данные: {:?}", user_data);
 
+    if let Err(e) = validation::validate_user(&user_data.name, &user_data.phone, &user_data.email, &user_data.auth) {
+        return Json(format!("Ошибка валидации: {}", e));
+    }
+
     let db = init_db().await.unwrap();
+    let user_id = format!("user:{}", Uuid::new_v4());
+
     let query = format!(
-        "CREATE user SET name = '{}', email = '{}', password = '{}', phone = {}",
-        user_data.name, user_data.email, user_data.password, user_data.phone
+        "CREATE user SET id = '{}', name = '{}', email = '{}', phone = '{}'",
+        user_id, user_data.name, user_data.email, user_data.phone
     );
-    db.query(query).await.unwrap();
+    db.query(&query).await.unwrap();
+
+    if let Err(e) = user_data.auth.save(&user_id, &db).await {
+        return Json(format!("Ошибка сохранения авторизации: {}", e));
+    }
 
     Json(format!("Пользователь создан: {}", user_data.name))
 }

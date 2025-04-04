@@ -1,14 +1,49 @@
 use serde::{Deserialize, Serialize};
 use surrealdb::RecordId;
+use surrealdb::Surreal;
+use surrealdb::engine::local::Db;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(crate = "rocket::serde")]
 pub struct User {
     pub name: String,
     pub email: String,
-    pub password: String,
     pub phone: String,
+    pub auth: AuthMethod,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum AuthMethod {
+    Password { password: String },
+    Yandex { provider_user_id: String }
+}
+
+impl AuthMethod {
+    pub async fn save(&self, user_id: &str, db: &Surreal<Db>) -> Result<(), String> {
+        match self {
+            AuthMethod::Password { password } => {
+                let hashed = super::hash_password(password);
+                let auth_id = format!("auth:password:{}", Uuid::new_v4());
+                let query = format!(
+                    "CREATE `{}` SET user = '{}', provider = 'password', hashed_password = '{}'",
+                    auth_id, user_id, hashed
+                );
+                db.query(&query).await.map_err(|e| e.to_string())?;
+            }
+
+            AuthMethod::Yandex { provider_user_id } => {
+                let auth_id = format!("auth:yandex:{}", provider_user_id);
+                let query = format!(
+                    "CREATE `{}` SET user = '{}', provider = 'yandex', provider_user_id = '{}'",
+                    auth_id, user_id, provider_user_id
+                );
+                db.query(&query).await.map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+}
+
 
 #[derive(Debug, Deserialize)]
 pub struct RecordUser {
@@ -41,12 +76,12 @@ pub struct RecordParams {
 }
 
 impl User {
-    pub fn create(name: String, email: String, password: String, phone: String) -> User {
+    pub fn create(name: String, email: String, phone: String, auth: AuthMethod) -> User {
         User {
             name,
             email,
-            password,
             phone,
+            auth,
         }
     }
 }
