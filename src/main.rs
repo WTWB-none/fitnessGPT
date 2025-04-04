@@ -1,7 +1,8 @@
 use rocket::{get, post, routes};
 use rocket::fs::FileServer;
-use rocket::http::{Cookie, CookieJar};
+use rocket::http::{Cookie, CookieJar, Method};
 use rocket::serde::json::Json;
+use rocket_cors::{AllowedOrigins, CorsOptions};
 
 use surrealdb::Surreal;
 use surrealdb::engine::local::{RocksDb, Db};
@@ -12,6 +13,22 @@ async fn init_db() -> surrealdb::Result<Surreal<Db>> {
     let db = Surreal::new::<RocksDb>("data/db").await?;
     db.use_ns("data").use_db("data").await?;
     Ok(db)
+}
+
+fn validate_name(phone: String) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+fn validate_email(email: String) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+fn validate_pass(pass: String) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+fn validate_phone(phone: String) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
 }
 
 #[post("/create_user", data = "<user>")]
@@ -55,10 +72,23 @@ fn get_cookie(jar: &CookieJar<'_>) -> String {
 
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let cors = CorsOptions::default()
+        .allowed_origins(AllowedOrigins::all())
+        .allowed_methods(
+            vec![Method::Get, Method::Post, Method::Patch]
+                .into_iter()
+                .map(From::from)
+                .collect(),
+        )
+        .allow_credentials(true);
+
     let _rocket = rocket::build()
         .mount("/", routes![index, set_cookie, get_cookie, create_user, get_user])
         .mount("/static", FileServer::from("static"))
+        .attach(cors.to_cors().unwrap())
         .launch()
         .await?;
     Ok(())
+
 }

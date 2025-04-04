@@ -7,7 +7,7 @@ pub struct User {
     pub name: String,
     pub email: String,
     pub password: String,
-    pub phone: i128,
+    pub phone: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,7 +17,7 @@ pub struct RecordUser {
     name: String,
     email: String,
     password: String,
-    phone: i128,
+    phone: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ pub struct RecordParams {
 }
 
 impl User {
-    pub fn create(name: String, email: String, password: String, phone: i128) -> User {
+    pub fn create(name: String, email: String, password: String, phone: String) -> User {
         User {
             name,
             email,
