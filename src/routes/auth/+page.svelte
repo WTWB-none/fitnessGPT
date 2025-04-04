@@ -1,4 +1,5 @@
 <script>
+	import { json } from '@sveltejs/kit';
 	import { onMount } from 'svelte';
 
 	let show_reg = false;
@@ -9,6 +10,29 @@
 		phone = '';
 	let errors = {};
 	let isValid = false;
+
+	async function registerUser() {
+		let request_phone = phone.replace(/[^\d+]/g, '');
+		console.log(request_phone);
+		let request = {
+			name: login,
+			email: email,
+			phone: request_phone,
+			auth: {
+				Password: {
+					password: password
+				}
+			}
+		};
+		let response = await fetch('http://localhost:8000/auth/user', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+
+		if (response.ok) {
+			window.location.href = '/profile';
+		}
+	}
 
 	function validate() {
 		errors = {};
@@ -95,7 +119,11 @@
 					onclick={() => {
 						show_reg = true;
 						validate();
-					}}>Зарегистрироваться</span
+					}}
+					aria-label="register"
+					role="button"
+					onkeydown={() => {}}
+					tabindex="0">Зарегистрироваться</span
 				>
 			</p>
 		{:else}
@@ -121,14 +149,20 @@
 				onblur={validate}
 			/>
 			<p class="error">{errors.phone}</p>
-			<button class="auth-btn" type="submit" disabled={!isValid}>Зарегистрироваться</button>
+			<button class="auth-btn" type="submit" disabled={!isValid} onclick={() => registerUser()}
+				>Зарегистрироваться</button
+			>
 			<p>
 				Уже есть аккаунт? <span
 					class="link"
 					onclick={() => {
 						show_reg = false;
 						validate();
-					}}>Войти</span
+					}}
+					aria-label="register"
+					role="button"
+					onkeydown={() => {}}
+					tabindex="0">Войти</span
 				>
 			</p>
 		{/if}
@@ -146,7 +180,7 @@
 
 	.backdrop {
 		width: 100%;
-		height: 87vh;
+		height: 100vh;
 		display: flex;
 		align-items: center;
 		justify-content: center;
