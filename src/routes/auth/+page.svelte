@@ -14,7 +14,6 @@
 		errors = {};
 
 		if (!show_reg) {
-			// Валидация для входа
 			if (!/^[\w.-]+@[\w.-]+\.\w{2,}$/.test(email)) {
 				errors.email = 'Некорректный email';
 			}
@@ -22,7 +21,6 @@
 				errors.password = 'Минимум 6 символов';
 			}
 		} else {
-			// Валидация для регистрации
 			if (!/^[a-zA-Z0-9]{3,15}$/.test(login)) {
 				errors.login = 'Логин: 3-15 букв или цифр';
 			}
@@ -44,11 +42,10 @@
 	}
 
 	function formatPhone(event) {
-		let digits = event.target.value.replace(/\D/g, ''); // Удаляем всё, кроме цифр
-		if (digits.startsWith('7')) digits = digits.slice(1); // Убираем лишнюю 7 в начале
-		if (digits.length > 10) digits = digits.slice(0, 10); // Ограничиваем до 10 цифр
+		let digits = event.target.value.replace(/\D/g, '');
+		if (digits.startsWith('7')) digits = digits.slice(1);
+		if (digits.length > 10) digits = digits.slice(0, 10);
 
-		// Формируем красивый номер
 		let formatted = '+7';
 		if (digits.length > 0) formatted += ` (${digits.slice(0, 3)}`;
 		if (digits.length > 3) formatted += `) ${digits.slice(3, 6)}`;
