@@ -1,185 +1,207 @@
-use core::hash;
-use std::collections::HashMap;
-use std::vec;
-
-use rocket::http::uri::Query;
 use rocket::{get, post, routes};
 use rocket::fs::FileServer;
 use rocket::http::{Cookie, CookieJar, Method};
 use rocket::serde::json::Json;
 use rocket_cors::{AllowedOrigins, CorsOptions};
-
-use surrealdb::{RecordId, Surreal, Value};
-use surrealdb::engine::local::{RocksDb, Db};
-
-use sha2::{Sha256, Digest};
-
-
+use sqlx::PgPool;
 use uuid::Uuid;
-
-use argon2::{Argon2, PasswordHasher};
+use argon2::{Argon2, PasswordHasher, PasswordHash, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
-use argon2::{PasswordHash, PasswordVerifier};
-
 
 mod entity;
-mod validation;fn verify_password(password: &str, hashed_password: &str) -> Result<(), argon2::password_hash::Error> {
-    let parsed_hash = PasswordHash::new(hashed_password)?; // Парсим сохраненный хеш
+mod validation;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ApiResponse<T> {
+    success: bool,
+    data: Option<T>,
+    error: Option<String>,
+}
+
+impl<T: serde::Serialize> ApiResponse<T> {
+    fn success(data: T) -> Json<Self> {
+        Json(ApiResponse {
+            success: true,
+            data: Some(data),
+            error: None,
+        })
+    }
+
+    fn error(error: String) -> Json<Self> {
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(error),
+        })
+    }
+}
+
+#[derive(serde::Serialize)]
+struct LoginResponse {
+    phone: String,
+    email: String,
+    id: String,
+    nickname: String,
+}
+
+fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
+    let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    argon2.verify_password(password.as_bytes(), &parsed_hash) // Проверяем
+    let password_hash = argon2.hash_password(password.as_bytes(), &salt)?.to_string();
+    Ok(password_hash)
 }
 
-async fn init_db() -> surrealdb::Result<Surreal<Db>> {
-    let db = Surreal::new::<RocksDb>("data/db").await?;
-    db.use_ns("data").use_db("data").await?;
-    Ok(db)
-}
-
-
-fn hash_password_sha256(password: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    let result = hasher.finalize();
-    format!("{:x}", result) // Хеш в hex-формате
-}
 #[post("/register/user", data = "<user>")]
-async fn create_user(user: Json<entity::User>) -> Json<String> {
+async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> Json<ApiResponse<String>> {
     let user_data = user.into_inner();
     println!("Данные: {:?}", user_data);
 
-    if let Err(e) = validation::validate_user(&user_data.name, &user_data.phone, &user_data.email, &user_data.auth) {
-        return Json(format!("Ошибка валидации: {}", e));
+    if let Err(e) = validation::validate_user(&user_data.phone, &user_data.email, &user_data.auth, &user_data.nickname) {
+        return ApiResponse::error(format!("Ошибка валидации: {}", e));
     }
 
-    let db = init_db().await.unwrap();
-
-    let check_email_query = "SELECT email FROM user WHERE email = $email";
-    let mut response = match db.query(check_email_query)
-        .bind(("email", user_data.email.clone()))
+    let email_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE email = $1)")
+        .bind(&user_data.email)
+        .fetch_one(&**pool)
         .await
     {
-        Ok(res) => res,
-        Err(e) => return Json(format!("Ошибка запроса почты: {}", e)),
+        Ok(exists) => exists,
+        Err(e) => return ApiResponse::error(format!("Ошибка проверки email: {}", e)),
     };
 
-    let emails: Vec<String> = match response.take("email") {
-        Ok(emails) => emails,
-        Err(_) => vec![],
-    };
-
-    if !emails.is_empty() {
-        return Json("Пользователь с таким email уже существует".into());
+    if email_exists {
+        return ApiResponse::error("Пользователь с таким email уже существует".into());
     }
 
-    let check_phone_query = "SELECT phone FROM user WHERE phone = $phone";
-    let mut response = match db.query(check_phone_query)
-        .bind(("phone", user_data.phone.clone()))
+    let phone_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE phone = $1)")
+        .bind(&user_data.phone)
+        .fetch_one(&**pool)
         .await
     {
-        Ok(res) => res,
-        Err(e) => return Json(format!("Ошибка запроса телефона: {}", e)),
+        Ok(exists) => exists,
+        Err(e) => return ApiResponse::error(format!("Ошибка проверки телефона: {}", e)),
     };
 
-    let phones: Vec<String> = match response.take("phone") {
-        Ok(phones) => phones,
-        Err(_) => vec![],
+    if phone_exists {
+        return ApiResponse::error("Пользователь с таким номером уже существует".into());
+    }
+
+    let nickname_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE nickname = $1)")
+        .bind(&user_data.nickname)
+        .fetch_one(&**pool)
+        .await
+    {
+        Ok(exists) => exists,
+        Err(e) => return ApiResponse::error(format!("Ошибка проверки никнейма: {}", e)),
     };
 
-    if !phones.is_empty() {
-        return Json("Пользователь с таким номером уже существует".into());
+    if nickname_exists {
+        return ApiResponse::error("Пользователь с таким никнеймом уже существует".into());
     }
 
-    let user_id = format!("user:({})", Uuid::new_v4());
-    println!("{}", user_id);    
+    let user_id = Uuid::new_v4();
+    let (password, yandex_id) = match user_data.auth {
+        entity::AuthMethod::Password { password } => {
+            let hashed = match hash_password(&password) {
+                Ok(h) => h,
+                Err(e) => return ApiResponse::error(format!("Ошибка хеширования пароля: {}", e)),
+            };
+            (Some(hashed), None)
+        }
+        entity::AuthMethod::Yandex { provider_user_id } => (None, Some(provider_user_id)),
+    };
 
-    let query = format!(
-        "CREATE user SET id = '{}', name = '{}', email = '{}', phone = '{}'",
-        user_id, user_data.name, user_data.email, user_data.phone
-    );
-    db.query(&query).await.unwrap();
+    let result = sqlx::query(
+        "INSERT INTO Users (user_id, email, phone, password, yandex_id, nickname)
+         VALUES ($1, $2, $3, $4, $5, $6)"
+    )
+    .bind(user_id)
+    .bind(&user_data.email)
+    .bind(&user_data.phone)
+    .bind(password)
+    .bind(yandex_id)
+    .bind(&user_data.nickname)
+    .execute(&**pool)
+    .await;
 
-    if let Err(e) = user_data.auth.save(&user_id, &db).await {
-        return Json(format!("Ошибка сохранения авторизации: {}", e));
+    if let Err(e) = result {
+        return ApiResponse::error(format!("Ошибка вставки пользователя: {}", e));
     }
 
-    Json(format!("Пользователь создан: {}", user_data.name))
+    ApiResponse::success(format!("Пользователь создан: {}", user_data.nickname))
 }
 
 #[post("/auth/login", data = "<login_data>")]
-async fn  login(login_data: Json<entity::LoginUser>, jar: &CookieJar<'_>) -> Json<String> {
-
+async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>, _jar: &CookieJar<'_>) -> Json<ApiResponse<LoginResponse>> {
     let data = login_data.into_inner();
-    let b = data.ident == "phone";
+    let ident_field = match data.ident.as_str() {
+        "email" => "email",
+        "phone" => "phone",
+        _ => return ApiResponse::error("Неверный идентификатор".to_string()),
+    };
 
-    let query = format!("SELECT * FROM user WHERE {} = $login", data.ident);
-
-    let db = init_db().await.unwrap();
-
-    let mut response = match db.query(query)
-        .bind(("login", data.login.clone()))
+    let query = format!("SELECT user_id, email, phone, password, nickname FROM Users WHERE {} = $1", ident_field);
+    let row: Option<(Uuid, String, String, Option<String>, String)> = match sqlx::query_as(&query)
+        .bind(&data.login)
+        .fetch_optional(&**pool)
         .await
     {
-        Ok(res) => res,
-        Err(e) => return Json(format!("Ошибка запроса почты: {}", e)),
+        Ok(row) => row,
+        Err(e) => return ApiResponse::error(format!("Ошибка поиска пользователя: {}", e)),
     };
 
-    let res: Vec<String> = match response.take("phone") {
-        Ok(phones) => phones,
-        Err(_) => vec![],
-    };
-
-    let query = format!("SELECT VALUE id FROM user WHERE {} = '{}'", data.ident, res[0]);
-    
-    let mut id = match db.query(query)
-        .bind(("login", data.login.clone()))
-        .await
-    {
-        Ok(res) => res,
-        Err(e) => return Json(format!("Ошибка запроса почты: {}", e)),
-    };
-       
-    let id = id.take::<Option<RecordId>>(0).unwrap().unwrap();
-    let id = id.key().to_string();
-
-    let vec: Vec<char> = id.chars().collect::<Vec<char>>();
-    let r = vec.clone().into_iter().skip(1).take(vec.len() - 2).collect::<String>();
-
-    let query = format!("SELECT hashed_password FROM `{}`", format!("auth_password_{}", r));
-
-    let mut response = match db.query(query)
-        .await
-    {
-        Ok(res) => {println!("{:?}", res);res},
-        Err(e) => return Json(format!("Ошибка запроса почты: {}", e)),
-    };
-
-    let hash_pass: Vec<String> = match response.take("hashed_password") {
-        Ok(pass) => pass,
-        Err(_) => vec![],
-    };
-
-
-    
-    println!("{:?} {}",  hash_pass[0], hash_password_sha256(&data.password));
-    if hash_pass[0] == hash_password_sha256(&data.password) {
-        return Json(format!("name:Тест, phone:тест, email:тест, id:тест"))
+    match row {
+        Some((user_id, email, phone, Some(hashed_password), nickname)) => {
+            let parsed_hash = match PasswordHash::new(&hashed_password) {
+                Ok(hash) => hash,
+                Err(_) => return ApiResponse::error("Ошибка обработки пароля".to_string()),
+            };
+            if Argon2::default().verify_password(data.password.as_bytes(), &parsed_hash).is_ok() {
+                let response = LoginResponse {
+                    phone,
+                    email,
+                    id: user_id.to_string(),
+                    nickname,
+                };
+                ApiResponse::success(response)
+            } else {
+                ApiResponse::error("Неверный пароль".to_string())
+            }
+        }
+        Some(_) => ApiResponse::error("Используйте вход через Yandex".to_string()),
+        None => ApiResponse::error("Пользователь не зарегистрирован".to_string()),
     }
-
-    Json("Пользователь не зарегистрирован!".to_string())
-
 }
 
 #[get("/get_user_data/<id>")]
-async fn get_user(id: String) -> Json<Option<entity::RecordUser>> {
-    let db = init_db().await.unwrap();
-    let user_id = RecordId::from(("user", id.as_str()));
-    
-    match db.select(user_id).await {
-        Ok(user) => Json(user),
-        Err(e) => {
-            eprintln!("Ошибка получения пользователя: {}", e);
-            Json(None)
+async fn get_user(id: String, pool: &rocket::State<PgPool>) -> Json<ApiResponse<entity::RecordUser>> {
+    let user_id = match Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => return ApiResponse::error("Неверный формат ID".to_string()),
+    };
+
+    let row: Option<(Uuid, String, String, String)> = match sqlx::query_as(
+        "SELECT user_id, email, phone, nickname FROM Users WHERE user_id = $1"
+    )
+    .bind(user_id)
+    .fetch_optional(&**pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return ApiResponse::error(format!("Ошибка получения пользователя: {}", e)),
+    };
+
+    match row {
+        Some((user_id, email, phone, nickname)) => {
+            let user = entity::RecordUser {
+                id: user_id.to_string(),
+                email,
+                phone,
+                nickname,
+            };
+            ApiResponse::success(user)
         }
+        None => ApiResponse::error("Пользователь не найден".to_string()),
     }
 }
 
@@ -204,6 +226,8 @@ fn get_cookie(jar: &CookieJar<'_>) -> String {
 
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv::dotenv().ok();
+    let pool = PgPool::connect("postgres://exerted:Topparol754@localhost/fitness_assistant").await?;
 
     let cors = CorsOptions::default()
         .allowed_origins(AllowedOrigins::all())
@@ -216,11 +240,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true);
 
     let _rocket = rocket::build()
-        .mount("/", routes![index, set_cookie, get_cookie, create_user, get_user, login])
+        .manage(pool)
+        .mount("/", routes![index, set_cookie, get_cookie, create_user, login, get_user])
         .mount("/static", FileServer::from("static"))
         .attach(cors.to_cors().unwrap())
         .launch()
         .await?;
     Ok(())
-
 }

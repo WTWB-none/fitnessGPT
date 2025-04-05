@@ -1,21 +1,17 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::RecordId;
-use surrealdb::Surreal;
-use surrealdb::engine::local::Db;
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
-    pub name: String,
     pub email: String,
     pub phone: String,
     pub auth: AuthMethod,
+    pub nickname: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum AuthMethod {
     Password { password: String },
-    Yandex { provider_user_id: String }
+    Yandex { provider_user_id: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,41 +21,12 @@ pub struct LoginUser {
     pub password: String,
 }
 
-impl AuthMethod {
-    pub async fn save(&self, user_id: &str, db: &Surreal<Db>) -> Result<(), String> {
-        match self {
-            AuthMethod::Password { password } => {
-                let hashed = super::hash_password_sha256(password);
-                let auth_id = format!("auth_password_{}", user_id);
-                println!("{}", &auth_id);
-                let query = format!(
-                    "CREATE `{}` SET user = '{}', provider = 'password', hashed_password = '{}'",
-                    auth_id, user_id, hashed
-                );
-                db.query(&query).await.map_err(|e| e.to_string())?;
-            }
-
-            AuthMethod::Yandex { provider_user_id } => {
-                let auth_id = format!("auth_yandex_{}", user_id);
-                let query = format!(
-                    "CREATE `{}` SET user = '{}', provider = 'yandex', provider_user_id = '{}'",
-                    auth_id, user_id, provider_user_id
-                );
-                db.query(&query).await.map_err(|e| e.to_string())?;
-            }
-        }
-        Ok(())
-    }
-}
-
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordUser {
-    #[allow(dead_code)]
-    pub id: RecordId,
-    pub name: String,
+    pub id: String,
     pub email: String,
     pub phone: String,
+    pub nickname: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -67,40 +34,33 @@ pub struct Params {
     age: u8,
     height: u16,
     weight: u128,
-    user_id: RecordId,
+    user_id: String,
     target: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RecordParams {
-    #[allow(dead_code)]
-    id: RecordId,
+    id: String,
     date: String,
     title: String,
     content: String,
-    user_id: RecordId,
+    user_id: String,
     addition: String,
 }
 
 impl User {
-    pub fn create(name: String, email: String, phone: String, auth: AuthMethod) -> User {
+    pub fn create(email: String, phone: String, auth: AuthMethod, nickname: String) -> User {
         User {
-            name,
             email,
             phone,
             auth,
+            nickname,
         }
     }
 }
 
 impl Params {
-    pub fn add_params(
-        age: u8,
-        height: u16,
-        weight: u128,
-        user_id: RecordId,
-        target: String,
-    ) -> Params {
+    pub fn add_params(age: u8, height: u16, weight: u128, user_id: String, target: String) -> Params {
         Params {
             age,
             height,
@@ -108,12 +68,5 @@ impl Params {
             user_id,
             target,
         }
-    }
-}
-
-
-impl RecordUser {
-    pub fn get_uid(&self) -> &RecordId {
-        &self.id
     }
 }

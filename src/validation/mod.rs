@@ -1,65 +1,43 @@
-use crate::entity::AuthMethod;
 use regex::Regex;
-use email_address::EmailAddress;
-use lazy_static::lazy_static;
+use crate::entity::AuthMethod;
 
-pub fn validate_user(name: &str, phone: &str, email: &str, auth: &AuthMethod) -> Result<(), String> {
-    validate_name(name)?;
-    validate_phone(phone)?;
-    validate_email(email)?;
-
-    if let AuthMethod::Password { password } = auth {
-        validate_password(password)?;
+pub fn validate_user(phone: &str, email: &str, auth: &AuthMethod, nickname: &str) -> Result<(), String> {
+    let phone_regex = Regex::new(r"^\+?[0-9]{10,15}$").unwrap();
+    if !phone_regex.is_match(phone) {
+        return Err("Неверный формат телефона. Должен быть в формате +1234567890".to_string());
     }
 
-    Ok(())
-}
+    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    if !email_regex.is_match(email) {
+        return Err("Неверный формат email".to_string());
+    }
 
-fn validate_name(username: &str) -> Result<(), &'static str> {
-    lazy_static! {
-        static ref USERNAME_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9_-]{3,20}$").unwrap();
+    if nickname.is_empty() {
+        return Err("Никнейм не может быть пустым".to_string());
     }
-    if USERNAME_REGEX.is_match(username) {
-        Ok(())
-    } else {
-        Err("Имя пользователя должно содержать от 3 до 20 символов, включая буквы русского или английского алфавита, цифры, подчеркивания или дефисы.")
+    if nickname.len() < 3 || nickname.len() > 30 {
+        return Err("Никнейм должен быть от 3 до 30 символов".to_string());
     }
-}
+    let nickname_regex = Regex::new(r"^[a-zA-Z0-9_]+$").unwrap();
+    if !nickname_regex.is_match(nickname) {
+        return Err("Никнейм может содержать только буквы, цифры и подчеркивания".to_string());
+    }
 
-fn validate_phone(phone: &str) -> Result<(), &'static str> {
-    lazy_static! {
-        static ref PHONE_REGEX: Regex = Regex::new(r"^(?:\+7|8)\d{10}$").unwrap();
+    match auth {
+        AuthMethod::Password { password } => {
+            if password.len() < 8 {
+                return Err("Пароль должен быть не короче 8 символов".to_string());
+            }
+            if !password.chars().any(|c| c.is_digit(10)) || !password.chars().any(|c| c.is_alphabetic()) {
+                return Err("Пароль должен содержать буквы и цифры".to_string());
+            }
+        }
+        AuthMethod::Yandex { provider_user_id } => {
+            if provider_user_id.is_empty() {
+                return Err("ID пользователя Yandex не может быть пустым".to_string());
+            }
+        }
     }
-    if PHONE_REGEX.is_match(phone) {
-        Ok(())
-    } else {
-        Err("Номер телефона должен начинаться с '+7' или '8' и содержать 11 цифр.")
-    }
-}
 
-fn validate_email(email: &str) -> Result<(), &'static str> {
-    if EmailAddress::is_valid(email) {
-        Ok(())
-    } else {
-        Err("Некорректный формат адреса электронной почты.")
-    }
-}
-
-fn validate_password(password: &str) -> Result<(), &'static str> {
-    if password.len() < 8 {
-        return Err("Пароль должен содержать минимум 8 символов.");
-    }
-    if !password.chars().any(|c| c.is_uppercase()) {
-        return Err("Пароль должен содержать хотя бы одну заглавную букву.");
-    }
-    if !password.chars().any(|c| c.is_lowercase()) {
-        return Err("Пароль должен содержать хотя бы одну строчную букву.");
-    }
-    if !password.chars().any(|c| c.is_digit(10)) {
-        return Err("Пароль должен содержать хотя бы одну цифру.");
-    }
-    if !password.chars().any(|c| !c.is_alphanumeric()) {
-        return Err("Пароль должен содержать хотя бы один специальный символ.");
-    }
     Ok(())
 }
