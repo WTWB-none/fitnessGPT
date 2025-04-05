@@ -18,12 +18,20 @@ pub enum AuthMethod {
     Yandex { provider_user_id: String }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LoginUser {
+    pub login: String,
+    pub ident: String,
+    pub password: String,
+}
+
 impl AuthMethod {
     pub async fn save(&self, user_id: &str, db: &Surreal<Db>) -> Result<(), String> {
         match self {
             AuthMethod::Password { password } => {
-                let hashed = super::hash_password(password);
-                let auth_id = format!("auth:password:{}", Uuid::new_v4());
+                let hashed = super::hash_password_sha256(password);
+                let auth_id = format!("auth_password_{}", user_id);
+                println!("{}", &auth_id);
                 let query = format!(
                     "CREATE `{}` SET user = '{}', provider = 'password', hashed_password = '{}'",
                     auth_id, user_id, hashed
@@ -32,7 +40,7 @@ impl AuthMethod {
             }
 
             AuthMethod::Yandex { provider_user_id } => {
-                let auth_id = format!("auth:yandex:{}", provider_user_id);
+                let auth_id = format!("auth_yandex_{}", user_id);
                 let query = format!(
                     "CREATE `{}` SET user = '{}', provider = 'yandex', provider_user_id = '{}'",
                     auth_id, user_id, provider_user_id
@@ -45,14 +53,13 @@ impl AuthMethod {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordUser {
     #[allow(dead_code)]
-    id: RecordId,
-    name: String,
-    email: String,
-    password: String,
-    phone: String,
+    pub id: RecordId,
+    pub name: String,
+    pub email: String,
+    pub phone: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,6 +110,7 @@ impl Params {
         }
     }
 }
+
 
 impl RecordUser {
     pub fn get_uid(&self) -> &RecordId {

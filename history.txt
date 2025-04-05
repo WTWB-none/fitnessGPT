@@ -1,0 +1,47 @@
+#V2
+INFO FOR TABLE user;
+DEFINE TABLE user SCHEMALESS;
+CREATE user:alex SET name = 'Alex', email = 'alex@example.com', phone = '+79614149557', auth = { provider: 'password', hash: '...' };
+SELECT * FROM user;
+-- Посмотреть все записи в таблице auth\nSELECT * FROM auth;\n\n-- Найти записи для пользователя user:alex\nSELECT * FROM auth WHERE user = 'user:alex';
+SELECT * FROM auth WHERE provider = 'password';
+SELECT * FROM auth WHERE provider = 'Password';
+SELECT * FROM `auth_password_ba36226a-3bdb-44d2-9723-6b062848d286`
+SELECT * FROM `auth_password_user:542e282f-af0e-4bc2-ae96-ec5f80c82eb7`
+SELECT * FROM `user:5d8918bb-79b4-4d4c-986d-513a96139bdc`
+SELECT * FROM `auth_password_b7c39162-3a1c-418b-a636-a83305d17376`
+SELECT * FROM `user:5d8918bb-79b4-4d4c-986d-513a96139bdc`
+SELECT * FROM user;
+SELECT * FROM user WHERE id = `user:5d8918bb-79b4-4d4c-986d-513a96139bdc`;
+SELECT * FROM user;
+SELECT * FROM user WHERE id = `user:⟨user:b713694b-c420-49e1-923b-1a33e4e0c66b⟩`;
+SELECT * FROM user WHERE id = `user:b713694b-c420-49e1-923b-1a33e4e0c66b`;
+SELECT * FROM user WHERE id = `⟨user:b713694b-c420-49e1-923b-1a33e4e0c66b⟩`;
+SELECT * FROM `auth_password_b7c39162-3a1c-418b-a636-a83305d17376`
+SELECT * FROM user WHERE user = `⟨user:b713694b-c420-49e1-923b-1a33e4e0c66b⟩`;
+SELECT * FROM user WHERE id = `user:b713694b-c420-49e1-923b-1a33e4e0c66b`;
+SELECT * FROM user WHERE user = `user:b713694b-c420-49e1-923b-1a33e4e0c66b`;
+SELECT * FROM user WHERE user = `user:b713694b-c420-49e1-`;
+SELECT * FROM user WHERE phone = `+79614149557`;
+SELECT * FROM user WHERE phone = `+79644149557`;
+SELECT * FROM user:⟨user:fbc7f555-e916-461f-9735-c934dd228602⟩
+SELECT * FROM `auth_password_b7c39162-3a1c-418b-a636-a83305d17376`
+SELECT * FROM user;
+SELECT * FROM user WHERE id = `user:⟨user:be16c6be-8411-4c5a-a8e3-b271c951e0d8⟩`;
+SELECT * FROM user WHERE id = `user:(bcb06889-ef18-4b24-92da-0ac28f2cb442)`;
+SELECT * FROM user;
+SELECT * FROM user
+SELECT * FROM user[0]
+SELECT * FROM user[1]
+SELECT * FROM user WHERE id = user:⟨user:(1)⟩
+SELECT * FROM `auth_password_ec1c7f2d-31b3-4017-8e41-2d4e00777415`
+SELECT * FROM `auth_password_user:(4e8b55fb-a91f-44f9-b8d4-13be53592b6c)`
+SELECT * FROM user;
+SELECT id FROM user WHERE phone = '+79614149557'
+SELECT id FROM user WHERE 'phone' = '+79614149557'
+SELECT id FROM user WHERE phone = '+79614149557'
+SELECT VALUE id FROM user WHERE phone = '+79614149557'
+SELECT id FROM user WHERE phone = '+79614149557'
+SELECT VALUE id FROM user WHERE phone = '+79614149557'
+SELECT * FROM user
+SELECT * FROM `auth_password_user:(4e8b55fb-a91f-44f9-b8d4-13be53592b6c)`

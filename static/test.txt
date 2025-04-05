@@ -1,0 +1,27 @@
+curl -X POST http://localhost:8000/register/user \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "Alex",
+        "email": "alex@example.com",
+        "phone": "+79614149557",
+        "auth": {
+            "Password": {
+                "password": "Topparol_754"
+            }
+        }
+    }'
+
+    curl -X POST http://localhost:8000/login \
+  -H "Content-Type: application/json" \
+  -d '{
+        "identifier": "+79614149557",
+        "password": "Topparol_754"
+    }'
+
+      curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+        "login": "+79614149557",
+        "ident": "phone",
+        "password": "Topparol_754"
+    }'

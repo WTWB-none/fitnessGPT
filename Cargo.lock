@@ -2754,6 +2754,7 @@ dependencies = [
  "rocket_cors",
  "serde",
  "serde_json",
+ "sha2",
  "surrealdb",
  "tokio",
  "uuid",
