@@ -1,12 +1,18 @@
 use rocket::{get, post, routes};
 use rocket::fs::FileServer;
-use rocket::http::{Cookie, CookieJar, Method};
+use rocket::http::{CookieJar, Method};
 use rocket::serde::json::Json;
+use rocket::State;
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use sqlx::PgPool;
 use uuid::Uuid;
 use argon2::{Argon2, PasswordHasher, PasswordHash, PasswordVerifier};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
+use lettre::{SmtpTransport, Transport, Message};
+use lettre::message::SinglePart;
+use lettre::transport::smtp::authentication::Credentials;
+use dotenv::dotenv;
+use std::env;
 
 mod entity;
 mod validation;
@@ -37,6 +43,12 @@ impl<T: serde::Serialize> ApiResponse<T> {
 }
 
 #[derive(serde::Serialize)]
+struct PostResponse {
+    user_id: String,
+    message: String,
+}
+
+#[derive(serde::Serialize)]
 struct LoginResponse {
     phone: String,
     email: String,
@@ -51,8 +63,32 @@ fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error>
     Ok(password_hash)
 }
 
+fn send_email(recipient_email: &str, subject: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
+
+    let smtp_server = env::var("SMTP_SERVER")?;
+    let smtp_user = env::var("SMTP_USER")?;
+    let smtp_password = env::var("SMTP_PASSWORD")?;
+    let mail_from = env::var("MAIL_FROM")?;
+
+    let email = Message::builder()
+        .from(mail_from.parse()?)
+        .to(recipient_email.parse()?)
+        .subject(subject)
+        .singlepart(SinglePart::plain(body.to_string()))?;
+
+    let credentials = Credentials::new(smtp_user, smtp_password);
+    let mailer = SmtpTransport::relay(&smtp_server)?
+        .credentials(credentials)
+        .build();
+
+    mailer.send(&email)?;
+
+    Ok(())
+}
+
 #[post("/register/user", data = "<user>")]
-async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> Json<ApiResponse<String>> {
+async fn create_user(user: Json<entity::User>, pool: &State<PgPool>) -> Json<ApiResponse<PostResponse>> {
     let user_data = user.into_inner();
     println!("Данные: {:?}", user_data);
 
@@ -63,12 +99,10 @@ async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> 
     let email_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE email = $1)")
         .bind(&user_data.email)
         .fetch_one(&**pool)
-        .await
-    {
-        Ok(exists) => exists,
-        Err(e) => return ApiResponse::error(format!("Ошибка проверки email: {}", e)),
-    };
-
+        .await {
+            Ok(exists) => exists,
+            Err(e) => return ApiResponse::error(format!("Ошибка проверки email: {}", e)),
+        };
     if email_exists {
         return ApiResponse::error("Пользователь с таким email уже существует".into());
     }
@@ -76,12 +110,10 @@ async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> 
     let phone_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE phone = $1)")
         .bind(&user_data.phone)
         .fetch_one(&**pool)
-        .await
-    {
-        Ok(exists) => exists,
-        Err(e) => return ApiResponse::error(format!("Ошибка проверки телефона: {}", e)),
-    };
-
+        .await {
+            Ok(exists) => exists,
+            Err(e) => return ApiResponse::error(format!("Ошибка проверки телефона: {}", e)),
+        };
     if phone_exists {
         return ApiResponse::error("Пользователь с таким номером уже существует".into());
     }
@@ -89,12 +121,10 @@ async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> 
     let nickname_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE nickname = $1)")
         .bind(&user_data.nickname)
         .fetch_one(&**pool)
-        .await
-    {
-        Ok(exists) => exists,
-        Err(e) => return ApiResponse::error(format!("Ошибка проверки никнейма: {}", e)),
-    };
-
+        .await {
+            Ok(exists) => exists,
+            Err(e) => return ApiResponse::error(format!("Ошибка проверки никнейма: {}", e)),
+        };
     if nickname_exists {
         return ApiResponse::error("Пользователь с таким никнеймом уже существует".into());
     }
@@ -128,11 +158,65 @@ async fn create_user(user: Json<entity::User>, pool: &rocket::State<PgPool>) -> 
         return ApiResponse::error(format!("Ошибка вставки пользователя: {}", e));
     }
 
-    ApiResponse::success(format!("Пользователь создан: {}", user_data.nickname))
+    let subject = "Регистрация успешна!";
+    let body = format!("Здравствуйте, {}! Ваш аккаунт был успешно зарегистрирован.", user_data.nickname);
+    if let Err(e) = send_email(&user_data.email, subject, &body) {
+        return ApiResponse::error(format!("Не удалось отправить письмо: {}", e));
+    }
+
+    ApiResponse::success(PostResponse {
+        user_id: user_id.to_string(),
+        message: format!("Пользователь создан: {}", user_data.nickname),
+    })
+}
+
+#[post("/profile", data = "<profile_params>")]
+async fn create_profile(
+    profile_params: Json<entity::ProfileParams>,
+    pool: &State<PgPool>,
+) -> Json<ApiResponse<PostResponse>> {
+    let params = profile_params.into_inner();
+    
+    let user_id = match Uuid::parse_str(&params.user_id) {
+        Ok(uuid) => uuid,
+        Err(_) => return ApiResponse::error("Неверный формат user_id".to_string()),
+    };
+
+    let user_exists: bool = match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE user_id = $1)")
+        .bind(&user_id)
+        .fetch_one(&**pool)
+        .await {
+            Ok(exists) => exists,
+            Err(e) => return ApiResponse::error(format!("Ошибка проверки пользователя: {}", e)),
+        };
+
+    if !user_exists {
+        return ApiResponse::error("Пользователь не найден".to_string());
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO profiles (user_id_new, age, height, weight, goal)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(user_id)
+    .bind(params.age as i32)
+    .bind(params.height as f64)
+    .bind(params.weight as f64)
+    .bind(&params.goal)
+    .execute(&**pool)
+    .await;
+
+    match result {
+        Ok(_) => ApiResponse::success(PostResponse {
+            user_id: user_id.to_string(),
+            message: "Профиль успешно создан".to_string(),
+        }),
+        Err(e) => ApiResponse::error(format!("Ошибка добавления профиля: {}", e)),
+    }
 }
 
 #[post("/auth/login", data = "<login_data>")]
-async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>, _jar: &CookieJar<'_>) -> Json<ApiResponse<LoginResponse>> {
+async fn login(login_data: Json<entity::LoginUser>, pool: &State<PgPool>, _jar: &CookieJar<'_>) -> Json<ApiResponse<LoginResponse>> {
     let data = login_data.into_inner();
     let ident_field = match data.ident.as_str() {
         "email" => "email",
@@ -140,25 +224,23 @@ async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>
         _ => return ApiResponse::error("Неверный идентификатор".to_string()),
     };
 
-    // Проверяем пользователя и его yandex_id
-    let query = format!("SELECT user_id, email, phone, password, nickname, yandex_id FROM Users WHERE {} = $1", ident_field);
+    let query = format!(
+        "SELECT user_id, email, phone, password, nickname, yandex_id FROM Users WHERE {} = $1",
+        ident_field
+    );
     let row: Option<(Uuid, String, String, Option<String>, String, Option<String>)> = match sqlx::query_as(&query)
         .bind(&data.login)
         .fetch_optional(&**pool)
-        .await
-    {
-        Ok(row) => row,
-        Err(e) => return ApiResponse::error(format!("Ошибка поиска пользователя: {}", e)),
-    };
+        .await {
+            Ok(row) => row,
+            Err(e) => return ApiResponse::error(format!("Ошибка поиска пользователя: {}", e)),
+        };
 
     match row {
         Some((user_id, email, phone, password, nickname, yandex_id)) => {
-            // Если yandex_id не пустой, пользователь зарегистрирован через Yandex, вход только через Yandex
             if yandex_id.is_some() {
                 return ApiResponse::error("Пользователь зарегистрирован через Yandex. Войдите через Yandex.".to_string());
             }
-
-            // Если yandex_id пустой, проверяем пароль
             match password {
                 Some(hashed_password) => {
                     let parsed_hash = match PasswordHash::new(&hashed_password) {
@@ -180,35 +262,50 @@ async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>
                 None => ApiResponse::error("Пользователь не зарегистрирован через пароль. Войдите через Yandex.".to_string()),
             }
         }
-        None => ApiResponse::error("Пользователь не зарегистрирован".to_string()),
+        None => ApiResponse::error("Пользователь не найден".to_string()),
     }
 }
 
 #[get("/get_user_data/<id>")]
-async fn get_user(id: String, pool: &rocket::State<PgPool>) -> Json<ApiResponse<entity::RecordUser>> {
+async fn get_user(id: String, pool: &State<PgPool>) -> Json<ApiResponse<entity::UserWithProfile>> {
     let user_id = match Uuid::parse_str(&id) {
         Ok(uuid) => uuid,
         Err(_) => return ApiResponse::error("Неверный формат ID".to_string()),
     };
 
-    let row: Option<(Uuid, String, String, String)> = match sqlx::query_as(
-        "SELECT user_id, email, phone, nickname FROM Users WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_optional(&**pool)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return ApiResponse::error(format!("Ошибка получения пользователя: {}", e)),
-    };
+    let row: Option<(Uuid, String, String, String, Option<i32>, Option<f64>, Option<f64>, Option<String>)> = 
+        match sqlx::query_as(
+            "SELECT 
+                u.user_id, 
+                u.email, 
+                u.phone, 
+                u.nickname, 
+                p.age, 
+                p.height, 
+                p.weight, 
+                p.goal 
+            FROM Users u 
+            LEFT JOIN profiles p ON u.user_id = p.user_id_new 
+            WHERE u.user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_optional(&**pool)
+        .await {
+            Ok(row) => row,
+            Err(e) => return ApiResponse::error(format!("Ошибка получения данных пользователя: {}", e)),
+        };
 
     match row {
-        Some((user_id, email, phone, nickname)) => {
-            let user = entity::RecordUser {
+        Some((user_id, email, phone, nickname, age, height, weight, goal)) => {
+            let user = entity::UserWithProfile {
                 id: user_id.to_string(),
                 email,
                 phone,
                 nickname,
+                age,
+                height,
+                weight,
+                goal,
             };
             ApiResponse::success(user)
         }
@@ -221,24 +318,11 @@ fn index() -> &'static str {
     "Main page!"
 }
 
-#[get("/set_cookie")]
-fn set_cookie(jar: &CookieJar<'_>) -> &'static str {
-    jar.add(Cookie::new("user", "Alex"));
-    "Кука установлена!"
-}
-
-#[get("/get_cookie")]
-fn get_cookie(jar: &CookieJar<'_>) -> String {
-    match jar.get("user") {
-        Some(cookie) => format!("Кука: {}", cookie.value()),
-        None => "Кука не найдена".to_string(),
-    }
-}
-
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
     let pool = PgPool::connect("postgres://exerted:Topparol754@localhost/fitness_assistant").await?;
-
+    
     let cors = CorsOptions::default()
         .allowed_origins(AllowedOrigins::all())
         .allowed_methods(
@@ -248,10 +332,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect(),
         )
         .allow_credentials(true);
-
+    
     let _rocket = rocket::build()
         .manage(pool)
-        .mount("/", routes![index, set_cookie, get_cookie, create_user, get_user, login])
+        .mount("/", routes![index, create_user, get_user, login, create_profile])
         .mount("/static", FileServer::from("static"))
         .attach(cors.to_cors().unwrap())
         .launch()

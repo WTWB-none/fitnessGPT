@@ -6,3 +6,13 @@ curl -X POST http://localhost:8000/register/user \
 curl -X POST http://localhost:8000/auth/login \
 -H "Content-Type: application/json" \
 -d '{"login": "alex@example.com", "ident": "email", "password": "password123"}'
+
+curl -X POST http://localhost:8000/profile \
+-H "Content-Type: application/json" \
+-d '{
+    "user_id": "88c61b70-b0d9-4538-a6fb-3e7874ff2f30",
+    "age": 25,
+    "height": 175.5,
+    "weight": 70.2,
+    "goal": "lose weight"
+}'

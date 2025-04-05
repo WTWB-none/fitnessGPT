@@ -9,6 +9,24 @@ pub struct User {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct UserWithProfile {
+    pub id: String,
+    pub email: String,
+    pub phone: String,
+    pub nickname: String,
+    pub age: Option<i32>,
+    pub height: Option<f64>,
+    pub weight: Option<f64>,
+    pub goal: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PostResponse {
+    user_id: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AuthMethod {
     Password { password: String },
     Yandex { provider_user_id: String },
@@ -29,23 +47,13 @@ pub struct RecordUser {
     pub nickname: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Params {
-    age: u8,
-    height: u16,
-    weight: u128,
-    user_id: String,
-    target: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct RecordParams {
-    id: String,
-    date: String,
-    title: String,
-    content: String,
-    user_id: String,
-    addition: String,
+#[derive(Serialize, Deserialize)]
+pub struct ProfileParams {
+    pub user_id: String,
+    pub age: u8,
+    pub height: f32,
+    pub weight: f32,
+    pub goal: String,
 }
 
 impl User {
@@ -55,18 +63,6 @@ impl User {
             phone,
             auth,
             nickname,
-        }
-    }
-}
-
-impl Params {
-    pub fn add_params(age: u8, height: u16, weight: u128, user_id: String, target: String) -> Params {
-        Params {
-            age,
-            height,
-            weight,
-            user_id,
-            target,
         }
     }
 }
