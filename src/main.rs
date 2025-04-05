@@ -226,7 +226,6 @@ fn get_cookie(jar: &CookieJar<'_>) -> String {
 
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv::dotenv().ok();
     let pool = PgPool::connect("postgres://exerted:Topparol754@localhost/fitness_assistant").await?;
 
     let cors = CorsOptions::default()
@@ -241,7 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _rocket = rocket::build()
         .manage(pool)
-        .mount("/", routes![index, set_cookie, get_cookie, create_user, login, get_user])
+        .mount("/", routes![index, set_cookie, get_cookie, create_user, get_user, login])
         .mount("/static", FileServer::from("static"))
         .attach(cors.to_cors().unwrap())
         .launch()

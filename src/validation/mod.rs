@@ -4,7 +4,7 @@ use crate::entity::AuthMethod;
 pub fn validate_user(phone: &str, email: &str, auth: &AuthMethod, nickname: &str) -> Result<(), String> {
     let phone_regex = Regex::new(r"^\+?[0-9]{10,15}$").unwrap();
     if !phone_regex.is_match(phone) {
-        return Err("Неверный формат телефона. Должен быть в формате +1234567890".to_string());
+        return Err("Неверный формат телефона. Должен быть в формате +77777777777".to_string());
     }
 
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
