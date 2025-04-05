@@ -140,8 +140,9 @@ async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>
         _ => return ApiResponse::error("Неверный идентификатор".to_string()),
     };
 
-    let query = format!("SELECT user_id, email, phone, password, nickname FROM Users WHERE {} = $1", ident_field);
-    let row: Option<(Uuid, String, String, Option<String>, String)> = match sqlx::query_as(&query)
+    // Проверяем пользователя и его yandex_id
+    let query = format!("SELECT user_id, email, phone, password, nickname, yandex_id FROM Users WHERE {} = $1", ident_field);
+    let row: Option<(Uuid, String, String, Option<String>, String, Option<String>)> = match sqlx::query_as(&query)
         .bind(&data.login)
         .fetch_optional(&**pool)
         .await
@@ -151,24 +152,34 @@ async fn login(login_data: Json<entity::LoginUser>, pool: &rocket::State<PgPool>
     };
 
     match row {
-        Some((user_id, email, phone, Some(hashed_password), nickname)) => {
-            let parsed_hash = match PasswordHash::new(&hashed_password) {
-                Ok(hash) => hash,
-                Err(_) => return ApiResponse::error("Ошибка обработки пароля".to_string()),
-            };
-            if Argon2::default().verify_password(data.password.as_bytes(), &parsed_hash).is_ok() {
-                let response = LoginResponse {
-                    phone,
-                    email,
-                    id: user_id.to_string(),
-                    nickname,
-                };
-                ApiResponse::success(response)
-            } else {
-                ApiResponse::error("Неверный пароль".to_string())
+        Some((user_id, email, phone, password, nickname, yandex_id)) => {
+            // Если yandex_id не пустой, пользователь зарегистрирован через Yandex, вход только через Yandex
+            if yandex_id.is_some() {
+                return ApiResponse::error("Пользователь зарегистрирован через Yandex. Войдите через Yandex.".to_string());
+            }
+
+            // Если yandex_id пустой, проверяем пароль
+            match password {
+                Some(hashed_password) => {
+                    let parsed_hash = match PasswordHash::new(&hashed_password) {
+                        Ok(hash) => hash,
+                        Err(_) => return ApiResponse::error("Ошибка обработки пароля".to_string()),
+                    };
+                    if Argon2::default().verify_password(data.password.as_bytes(), &parsed_hash).is_ok() {
+                        let response = LoginResponse {
+                            phone,
+                            email,
+                            id: user_id.to_string(),
+                            nickname,
+                        };
+                        ApiResponse::success(response)
+                    } else {
+                        ApiResponse::error("Неверный пароль".to_string())
+                    }
+                }
+                None => ApiResponse::error("Пользователь не зарегистрирован через пароль. Войдите через Yandex.".to_string()),
             }
         }
-        Some(_) => ApiResponse::error("Используйте вход через Yandex".to_string()),
         None => ApiResponse::error("Пользователь не зарегистрирован".to_string()),
     }
 }
