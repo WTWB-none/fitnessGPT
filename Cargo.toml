@@ -15,3 +15,6 @@ lettre = { version = "0.10", features = ["tokio1-native-tls"] }
 regex = "1.5"
 rand = "0.8"
 dotenv = "0.15"
+log = "0.4"       
+env_logger = "0.10"  
+thiserror = "1.0"

@@ -16,3 +16,5 @@ curl -X POST http://localhost:8000/profile \
     "weight": 70.2,
     "goal": "lose weight"
 }'
+
+RUST_LOG=info cargo run
