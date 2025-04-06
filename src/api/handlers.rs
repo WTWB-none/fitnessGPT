@@ -5,6 +5,11 @@ use rocket::State;
 use sqlx::PgPool;
 use uuid::Uuid;
 use log::{error, info};
+use reqwest::Client;
+use std::fs::File;
+use std::io::Write;
+use serde_json::{Value, from_str};
+use regex::Regex;
 
 use crate::entity::models::{User, LoginUser, ProfileParams, UserWithProfile, AuthMethod};
 use crate::validation::validators::validate_user;
@@ -104,30 +109,117 @@ pub async fn create_profile(
     pool: &State<PgPool>,
 ) -> Json<ApiResponse<PostResponse>> {
     let params = profile_params.into_inner();
-    let user_id = match Uuid::parse_str(&params.user_id) { // Исправлено: params вместо ¶ms
+    let user_id = match Uuid::parse_str(&params.user_id) { // Исправлено: params.user_id
         Ok(uuid) => uuid,
         Err(_) => return ApiResponse::error("Неверный формат user_id".to_string()),
     };
 
     if !check_exists(pool, "user_id", &user_id.to_string()).await {
+        error!("Пользователь с user_id {} не найден в базе", user_id);
         return ApiResponse::error("Пользователь не найден".to_string());
     }
 
+    // Создаем HTTP-клиент для запроса к Google Gemini API
+    let client = Client::new();
+    let api_key = "AIzaSyAcXLSJtXW1qVLpPZVbPEdYGwKAd9-KYFQ"; // Лучше вынести в конфиг
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+        api_key
+    );
+
+    // Формируем запрос к API
+    let request_body = serde_json::json!({
+        "contents": [{
+            "parts": [{
+                "text": format!(
+                    "Сформируй план тренировок и питания на неделю для человека весом {}кг, ростом {}см, цель — {}. \
+                    Ответ в JSON с ключами workouts и meals. В свою очередь meal должен иметь поля meal description и day \
+                    (сокращенный до двух символов как принято в России) расписанные для каждого дня, а workout day type duration \
+                    и description используй для значений полей русский язык в description должен быть массив упражнений/еды \
+                    с ключами exercise, rest, reps, sets/meal(какой прием пищи), food(вся еда) эти ключи обязательны для \
+                    каждого элемента массива даже если это отдых. Также у каждого элемента description должен быть ключ checked \
+                    со значением false",
+                    params.weight, params.height, &params.goal
+                )
+            }]
+        }]
+    });
+
+    // Отправляем запрос
+    let response = match client.post(&url)
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await {
+            Ok(resp) => resp,
+            Err(e) => {
+                error!("Ошибка запроса к Google Gemini API: {}", e);
+                return ApiResponse::error(format!("Ошибка запроса к API: {}", e));
+            }
+        };
+
+    let result: Value = match response.json().await {
+        Ok(json) => json,
+        Err(e) => {
+            error!("Ошибка десериализации ответа API: {}", e);
+            return ApiResponse::error(format!("Ошибка десериализации ответа: {}", e));
+        }
+    };
+
+    // Извлекаем JSON из ответа
+    let raw_text = result["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .unwrap_or("");
+    let re = Regex::new(r"\{[\s\S]*\}").unwrap();
+    let json_text = match re.find(raw_text) {
+        Some(m) => m.as_str(),
+        None => {
+            error!("JSON не найден в ответе API");
+            return ApiResponse::error("JSON не найден в ответе API".to_string());
+        }
+    };
+    let plan: Value = match from_str(json_text) {
+        Ok(plan) => plan,
+        Err(e) => {
+            error!("Ошибка парсинга JSON из ответа: {}", e);
+            return ApiResponse::error(format!("Ошибка парсинга JSON: {}", e));
+        }
+    };
+
+    // Сохраняем JSON в файл в папке static
+    let file_path = format!("static/{}_plan.json", user_id);
+    let mut file = match File::create(&file_path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Ошибка создания файла {}: {}", file_path, e);
+            return ApiResponse::error(format!("Ошибка создания файла: {}", e));
+        }
+    };
+    if let Err(e) = file.write_all(serde_json::to_string_pretty(&plan).unwrap().as_bytes()) {
+        error!("Ошибка записи в файл {}: {}", file_path, e);
+        return ApiResponse::error(format!("Ошибка записи в файл: {}", e));
+    }
+
+    // Формируем URL для файла
+    let plan_url = format!("/static/{}_plan.json", user_id);
+
+    // Записываем профиль в базу данных с URL
     let result = sqlx::query(
-        "INSERT INTO profiles (user_id_new, age, height, weight, goal)
-         VALUES ($1, $2, $3, $4, $5)"
+        "INSERT INTO profiles (user_id_new, age, height, weight, goal, plan_url)
+         VALUES ($1, $2, $3, $4, $5, $6)"
     )
     .bind(user_id)
     .bind(params.age as i32)
     .bind(params.height as f64)
     .bind(params.weight as f64)
-    .bind(&params.goal) // Исправлено: params вместо ¶ms
+    .bind(&params.goal)
+    .bind(&plan_url)
     .execute(&**pool)
     .await;
 
     match result {
         Ok(_) => {
-            info!("Профиль для пользователя {} создан", user_id);
+            info!("Профиль для пользователя {} создан с plan_url: {}", user_id, plan_url);
             ApiResponse::success(PostResponse {
                 user_id: user_id.to_string(),
                 message: "Профиль успешно создан".to_string(),
@@ -236,24 +328,26 @@ pub async fn get_user(id: String, pool: &State<PgPool>) -> Json<ApiResponse<User
 }
 
 async fn check_exists(pool: &State<PgPool>, field: &str, value: &str) -> bool {
-    let result = match field {
-        "email" => sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE email = $1)")
-            .bind(value)
-            .fetch_one(&**pool)
-            .await,
-        "phone" => sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE phone = $1)")
-            .bind(value)
-            .fetch_one(&**pool)
-            .await,
-        "nickname" => sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE nickname = $1)")
-            .bind(value)
-            .fetch_one(&**pool)
-            .await,
-        "user_id" => sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM Users WHERE user_id = $1)")
-            .bind(value)
-            .fetch_one(&**pool)
-            .await,
-        _ => return false,
+    let query = match field {
+        "email" => "SELECT COUNT(*) FROM Users WHERE email = $1",
+        "phone" => "SELECT COUNT(*) FROM Users WHERE phone = $1",
+        "nickname" => "SELECT COUNT(*) FROM Users WHERE nickname = $1",
+        "user_id" => "SELECT COUNT(*) FROM Users WHERE user_id = $1::uuid",
+        _ => {
+            error!("Неверное поле для проверки: {}", field);
+            return false;
+        }
     };
-    result.unwrap_or(false)
+
+    match sqlx::query_scalar::<_, i64>(query)
+        .bind(value)
+        .fetch_one(&**pool)
+        .await
+    {
+        Ok(count) => count > 0,
+        Err(e) => {
+            error!("Ошибка проверки существования {} = {}: {}", field, value, e);
+            false
+        }
+    }
 }

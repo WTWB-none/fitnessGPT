@@ -4,6 +4,7 @@ use rocket::http::Method;
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use sqlx::PgPool;
 use dotenv::dotenv;
+use std::env;
 use log::info;
 
 mod api;
@@ -42,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Сервер запускается на порту 8000...");
     let _rocket = rocket::build()
         .manage(pool)
-        .manage(config) 
+        .manage(config)
         .mount(
             "/",
             routes![index, create_user, login, get_user, create_profile],
