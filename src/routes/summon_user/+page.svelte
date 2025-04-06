@@ -1,49 +1,72 @@
 <script>
 	import { onMount } from 'svelte';
 
-	let params = $state();
-	let accessToken = $state('');
-	let userData = $state({});
-	let request = $state({});
-	async function getUserData() {
-		let response = await fetch('https://login.yandex.ru/info', {
+	async function getUserData(token) {
+		const response = await fetch('https://login.yandex.ru/info', {
 			method: 'GET',
-			headers: {
-				Authorization: `OAuth ${accessToken}`
-			}
+			headers: { Authorization: `OAuth ${token}` }
 		});
-		return response.json();
+		if (!response.ok) throw new Error(`Ошибка Яндекс API: ${response.status}`);
+		return await response.json();
 	}
 
 	async function sendData(query) {
-		let response = await fetch('http://localhost:8000/auth/user', {
+		const response = await fetch('http://localhost:8000/register/user', {
 			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(query)
 		});
-		console.log(response);
-		return response;
+		if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
+		return await response.json();
 	}
 
 	onMount(async () => {
-		params = window.location.hash.slice(1);
-		accessToken = params.split('&')[0].split('=')[1];
-		userData = await getUserData();
-		request = {
-			name: userData.login,
-			email: userData.default_email,
-			phone: userData.default_phone.number,
-			auth: {
-				Yandex: {
-					provider_user_id: userData.client_id
-				}
+		try {
+			const hash = window.location.hash.slice(1);
+			const params = new URLSearchParams(hash);
+			const accessToken = params.get('access_token');
+			if (!accessToken) throw new Error('Токен не найден');
+
+			const userData = await getUserData(accessToken);
+			const request = {
+				nickname: userData.login || 'unknown',
+				email: userData.default_email || '',
+				phone: userData.default_phone?.number || '',
+				auth: { Yandex: { provider_user_id: userData.client_id || userData.id } }
+			};
+
+			const serverResponse = await sendData(request);
+
+			if (window.opener) {
+				window.opener.postMessage(serverResponse, '*');
+				window.close();
 			}
-		};
-		let result = await sendData(request);
-		console.log(result);
-		if (result.status === 200) {
-			window.close();
-		} else {
-			alert('Error creating user');
+		} catch (err) {
+			console.error('Authentication error:', err);
+
+			if (window.opener) {
+				window.opener.postMessage({ success: false, error: err.message }, '*');
+				window.close();
+			}
 		}
 	});
 </script>
+
+<div>
+	<p>Обработка авторизации Яндекс...</p>
+</div>
+
+<style>
+	div {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		height: 100vh;
+		background-color: #333;
+	}
+	p {
+		color: #fff;
+		font-family: Arial, sans-serif;
+		font-size: 18px;
+	}
+</style>
