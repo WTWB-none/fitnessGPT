@@ -121,7 +121,7 @@ pub async fn create_profile(
 
     // Создаем HTTP-клиент для запроса к Google Gemini API
     let client = Client::new();
-    let api_key = "AIzaSyAcXLSJtXW1qVLpPZVbPEdYGwKAd9-KYFQ"; // Лучше вынести в конфиг
+    let api_key = "AIzaSyAcXLSJtXW1qVLpPZVbPEdYGwKAd9-KYFQ"; 
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
         api_key
@@ -286,6 +286,47 @@ pub async fn login(
             ApiResponse::error(format!("Ошибка поиска пользователя: {}", e))
         }
     }
+}
+
+#[get("/get_user_plan/<id>")]
+pub async fn get_user_plan(
+    id: String,
+    pool: &State<PgPool>,
+) -> Json<ApiResponse<Value>> {
+    let user_id = match Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => return ApiResponse::error("Неверный формат ID".to_string()),
+    };
+
+    // Проверяем существование пользователя
+    if !check_exists(pool, "user_id", &user_id.to_string()).await {
+        error!("Пользователь с user_id {} не найден", user_id);
+        return ApiResponse::error("Пользователь не найден".to_string());
+    }
+
+    // Формируем путь к файлу
+    let file_path = format!("static/{}_plan.json", user_id);
+    
+    // Читаем файл
+    let file_content = match std::fs::read_to_string(&file_path) {
+        Ok(content) => content,
+        Err(e) => {
+            error!("Ошибка чтения файла плана для {}: {}", user_id, e);
+            return ApiResponse::error(format!("Ошибка чтения файла плана: {}", e));
+        }
+    };
+
+    // Парсим JSON
+    let plan: Value = match from_str(&file_content) {
+        Ok(plan) => plan,
+        Err(e) => {
+            error!("Ошибка парсинга JSON для {}: {}", user_id, e);
+            return ApiResponse::error(format!("Ошибка парсинга JSON: {}", e));
+        }
+    };
+
+    info!("План для пользователя {} успешно получен", user_id);
+    ApiResponse::success(plan)
 }
 
 #[get("/get_user_data/<id>")]

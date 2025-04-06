@@ -1,3 +1,4 @@
+use api::handlers::get_user_plan;
 use rocket::{get, routes};
 use rocket::fs::FileServer;
 use rocket::http::Method;
@@ -46,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(config)
         .mount(
             "/",
-            routes![index, create_user, login, get_user, create_profile],
+            routes![index, create_user, login, get_user, create_profile, get_user_plan],
         )
         .mount("/static", FileServer::from("static"))
         .attach(cors.to_cors()?)
